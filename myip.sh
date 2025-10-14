@@ -26,7 +26,7 @@ current_date=`date`
 
 #echo "Current date is: $current_date"
 
-timestamp=$( date +"%Y-%m-%d %H:%M:%S")
+timestamp=$(date +"%Y-%m-%d %H:%M:%S")
 
 #echo "Timestamp is: $timestamp"
 
