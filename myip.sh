@@ -30,11 +30,23 @@ timestamp=$( date +"%Y-%m-%d %H:%M:%S")
 
 #echo "Timestamp is: $timestamp"
 
+max_retries=5
+attempt=1
 
-if ! ping -c 1 "$ip" >/dev/null 2>&1; then
-    echo "$timestamp - Ping to $ip failed. Exiting." >> $FILE
-    exit 1
-fi
+while ! ping -c 1 "$ip" >/dev/null 2>&1; do
+    #echo "Ping failed (attempt $attempt/$max_retries)"
+    ((attempt++))
+    if [ "$attempt" -gt "$max_retries" ]; then
+        echo "Ping to $ip failed after $max_retries attempts. Exiting." >> $FILE
+        exit 1
+    fi
+    sleep 120
+done
+
+#if ! ping -c 1 "$ip" >/dev/null 2>&1; then
+#    echo "$timestamp - Ping to $ip failed. Exiting." >> $FILE
+#    exit 1
+#fi
 
 if [[ "$previous_ip" != "$current_ip" ]]; then
        echo "$timestamp - $current_ip" >> $FILE 
