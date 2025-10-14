@@ -9,6 +9,10 @@ if [ ! -f "$FILE" ]; then
     touch "$FILE"
 fi
 
+timestamp=$(date +"%Y%m%d_%H%M%S")
+
+ip="62.103.146.102"
+
 # Store the last line in a variable
 previous_ip=$(tail -n 1 "$FILE" | awk -F' - ' '{print $2}')
 
@@ -22,11 +26,17 @@ current_date=`date`
 
 #echo "Current date is: $current_date"
 
-timestamp=$(date +"%Y%m%d_%H%M%S")
+timestamp=$( date +"%Y-%m-%d %H:%M:%S")
 
 #echo "Timestamp is: $timestamp"
 
+
+if ! ping -c 1 "$ip" >/dev/null 2>&1; then
+    echo "$timestamp - Ping to $ip failed. Exiting." >> $FILE
+    exit 1
+fi
+
 if [[ "$previous_ip" != "$current_ip" ]]; then
-       echo "$timestamp - $result" >> $FILE 
+       echo "$timestamp - $current_ip" >> $FILE 
 fi
 
