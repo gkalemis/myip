@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Specify the filename
-FILE="$HOME/useful/scripts/ips.txt"
+FILE="$HOME/useful/scripts/myip/ips.txt"
 
 # Check if file exists
 if [ ! -f "$FILE" ]; then
