@@ -1,7 +1,12 @@
 #!/bin/bash
 
 # Specify the filename
-FILE="$HOME/useful/scripts/myip/ips.txt"
+FILE="$HOME/useful/scripts/myip/ips2.txt"
+COMMAND="$(external-ip dns)"
+ip="194.63.236.15"
+max_retries=5
+attempt=1
+previous_ip=$(tail -n 1 "$FILE" | awk -F' - ' '{print $2}')
 
 # Check if file exists
 if [ ! -f "$FILE" ]; then
@@ -9,34 +14,17 @@ if [ ! -f "$FILE" ]; then
     touch "$FILE"
 fi
 
-ip="62.103.146.102"
 
-# Store the last line in a variable
-previous_ip=$(tail -n 1 "$FILE" | awk -F' - ' '{print $2}')
-
-#echo "Previous ip was: $last_line"
-
-current_ip=$(external-ip dns)
-
-#echo "Current ip is: $result"
-
-timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-
-#echo "Timestamp is: $timestamp"
-
-max_retries=5
-attempt=1
-
-while ! ping -c 1 "$ip" >/dev/null 2>&1; do
-    #echo "Ping failed (attempt $attempt/$max_retries)"
+while ! $COMMAND >/dev/null 2>&1; do
     ((attempt++))
     if [ "$attempt" -gt "$max_retries" ]; then
-        echo "Ping to $ip failed after $max_retries attempts. Exiting." >> $FILE
-        exit 1
+    	exit 1
     fi
-    sleep 120
+    sleep 9 
 done
 
-if [[ "$previous_ip" != "$current_ip" ]]; then
-       echo "$timestamp - $current_ip" >> $FILE 
+if $COMMAND >/dev/null 2>&1; then
+	if [[ "$previous_ip" != "$COMMAND" ]]; then
+       		echo "$timestamp - $current_ip"  
+	fi
 fi
