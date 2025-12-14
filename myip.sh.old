@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# Specify the filename
+FILE="$HOME/scripts/myip/ips.txt"
+
+# Check if file exists
+if [ ! -f "$FILE" ]; then
+    #echo "File does not exist. Creating $FILE..."
+    touch "$FILE"
+fi
+
+host="8.8.8.8"
+
+# Store the last line in a variable
+previous_ip=$(tail -n 1 "$FILE" | awk -F' - ' '{print $2}')
+
+#echo "Previous ip was: $last_line"
+
+#current_ip=$(dig +short myip.opendns.com @resolver1.opendns.com)
+current_ip=$(dig +short txt ch whoami.cloudflare @1.0.0.1 | tr -d '"')
+
+#echo "Current ip is: $result"
+
+timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+
+#echo "Timestamp is: $timestamp"
+
+max_attempts=5
+attempt=0
+
+while [[ $attempt -lt $max_attempts ]]; do
+    if ping -c1 "$host" &>/dev/null; then
+        #echo "Host is reachable."
+        break  # Exit the loop if the ping is successful
+    else
+        #echo "Ping attempt $((attempt + 1)) failed. Retrying in 7 seconds..."
+        ((attempt++))
+        sleep 7
+    fi
+done
+
+if [[ $attempt -eq $max_attempts ]]; then
+    #echo "Host is not reachable after $max_attempts attempts."
+    exit 1  # Exit the script if all attempts fail
+else
+    #echo "Continuing with the script..."
+    # Place the rest of your script here
+	if [[ "$previous_ip" != "$current_ip" ]]; then
+       		echo "$timestamp - $current_ip" >> $FILE 
+	fi
+fi
+
