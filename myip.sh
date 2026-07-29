@@ -1,59 +1,81 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Specify the filename
-FILE="$HOME/scripts/myip/ips.txt"
+set -u
+set -o pipefail
 
-# Check if file exists
-if [ ! -f "$FILE" ]; then
-    #echo "File does not exist. Creating $FILE..."
-    touch "$FILE"
-fi
+readonly FILE="$HOME/scripts/myip/ips.txt"
+readonly MAX_ATTEMPTS=5
+readonly RETRY_DELAY=7
+readonly DNS_SERVER=1.0.0.1
 
-#echo "Previous ip was: $last_line"
-previous_ip=$(tail -n 1 "$FILE" | awk -F' - ' '{print $2}')
+# Ensure the destination directory and file exist.
+mkdir -p "$(dirname "$FILE")"
+touch "$FILE"
 
-#echo "Timestamp is: $timestamp"
-timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+previous_ip=$(awk -F' - ' 'NF >= 2 {ip=$NF} END {print ip}' "$FILE")
 
-max_attempts=5
-attempt=0
+get_public_ip() {
+    dig \
+        +short \
+        +time=5 \
+        +tries=1 \
+        TXT \
+        CH \
+        whoami.cloudflare \
+        "@$DNS_SERVER" 2>/dev/null |
+        tr -d '"' |
+        head -n 1
+}
 
-while [[ $attempt -lt $max_attempts ]]; do
-    #echo "Current ip is: $result"
-    current_ip=$(dig +short txt ch whoami.cloudflare @1.0.0.1 | tr -d '"')
-    if [[ $current_ip == *"error"* ]]; then
-<<<<<<< HEAD
-        current_ip=""
+is_valid_ipv4() {
+    local ip=$1
+    local octet
+    local -a octets
+
+    IFS=. read -r -a octets <<< "$ip"
+
+    [[ ${#octets[@]} -eq 4 ]] || return 1
+
+    for octet in "${octets[@]}"; do
+        [[ $octet =~ ^[0-9]{1,3}$ ]] || return 1
+        ((10#$octet >= 0 && 10#$octet <= 255)) || return 1
+    done
+}
+
+current_ip=""
+
+for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+    current_ip=$(get_public_ip)
+
+    if is_valid_ipv4 "$current_ip"; then
+        echo "Current IP is: $current_ip"
+        break
     fi
-    if [ -n "$current_ip" ]; then
-        echo "Current ip is: $current_ip"
-=======
-    	current_ip=""
-    fi
-    if [ -n "$current_ip" ]; then
-        echo "Current ip is: $current_ip" 
->>>>>>> 7637e08 (Change the script to v.0.2)
-        break  # Exit the loop if the ping is successful
-    else
-        echo "Current ip cannot be found after $((attempt + 1)) attempts. Retrying in 7 seconds..."
-        ((attempt++))
-        sleep 7
+
+    current_ip=""
+
+    if ((attempt < MAX_ATTEMPTS)); then
+        echo "Could not determine the current IP on attempt $attempt/$MAX_ATTEMPTS."
+        echo "Retrying in $RETRY_DELAY seconds..."
+        sleep "$RETRY_DELAY"
     fi
 done
 
-if [[ $attempt -eq $max_attempts ]]; then
-    echo "Current ip cannot be found after $max_attempts attempts."
-    exit 1  # Exit the script if all attempts fail
+if [[ -z $current_ip ]]; then
+    echo "Error: could not determine the current IP after $MAX_ATTEMPTS attempts." >&2
+    exit 1
+fi
+
+if [[ $previous_ip == "$current_ip" ]]; then
+    echo "IP address has not changed."
+    exit 0
+fi
+
+timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+printf '%s - %s\n' "$timestamp" "$current_ip" >> "$FILE"
+
+if [[ -n $previous_ip ]]; then
+    echo "IP changed from $previous_ip to $current_ip."
 else
-<<<<<<< HEAD
-        # Write the new ip to the file
-        if [[ "$previous_ip" != "$current_ip" ]]; then
-                echo "$timestamp - $current_ip" >> $FILE
-        fi
-=======
-	# Write the new ip to the file
-	if [[ "$previous_ip" != "$current_ip" ]]; then
-       		echo "$timestamp - $current_ip" >> $FILE 
-	fi
->>>>>>> 7637e08 (Change the script to v.0.2)
+    echo "Initial IP address recorded."
 fi
