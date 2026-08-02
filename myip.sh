@@ -1,30 +1,80 @@
 #!/usr/bin/env bash
 
-set -u
-set -o pipefail
+set -Eeuo pipefail
 
-readonly FILE="$HOME/scripts/myip/ips.txt"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+readonly FILE="$SCRIPT_DIR/ips.txt"
 readonly MAX_ATTEMPTS=5
 readonly RETRY_DELAY=7
-readonly DNS_SERVER=1.0.0.1
+readonly LOCK_FILE="/tmp/myip.lock"
+readonly CLOUDFLARE_DNS=1.0.0.1
+readonly OPENDNS_DNS=208.67.222.222
+
+if ! command -v dig >/dev/null 2>&1; then
+    echo "Error: dig is required but was not found in PATH." >&2
+    exit 1
+fi
+
+if ! command -v flock >/dev/null 2>&1; then
+    echo "Error: flock is required but was not found in PATH." >&2
+    exit 1
+fi
+
+# Prevent overlapping cron invocations from writing duplicate entries.
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
 
 # Ensure the destination directory and file exist.
 mkdir -p "$(dirname "$FILE")"
 touch "$FILE"
 
-previous_ip=$(awk -F' - ' 'NF >= 2 {ip=$NF} END {print ip}' "$FILE")
+previous_ip=$(
+    awk -F' - ' '
+        NF >= 2 {
+            ip = $NF
+            gsub(/[[:space:]]/, "", ip)
+        }
+        END { print ip }
+    ' "$FILE"
+)
 
 get_public_ip() {
-    dig \
+    local ip
+
+    # Cloudflare TXT lookup.
+    ip=$(dig \
         +short \
         +time=5 \
         +tries=1 \
         TXT \
         CH \
         whoami.cloudflare \
-        "@$DNS_SERVER" 2>/dev/null |
+        "@$CLOUDFLARE_DNS" 2>/dev/null |
         tr -d '"' |
-        head -n 1
+        head -n 1) || ip=""
+
+    if is_valid_ipv4 "$ip"; then
+        printf '%s\n' "$ip"
+        return 0
+    fi
+
+    # OpenDNS A-record fallback.
+    ip=$(dig \
+        +short \
+        +time=5 \
+        +tries=1 \
+        A \
+        myip.opendns.com \
+        "@$OPENDNS_DNS" 2>/dev/null |
+        head -n 1) || ip=""
+
+    if is_valid_ipv4 "$ip"; then
+        printf '%s\n' "$ip"
+        return 0
+    fi
+
+    return 1
 }
 
 is_valid_ipv4() {
@@ -45,7 +95,11 @@ is_valid_ipv4() {
 current_ip=""
 
 for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
-    current_ip=$(get_public_ip)
+    if current_ip=$(get_public_ip); then
+        :
+    else
+        current_ip=""
+    fi
 
     if is_valid_ipv4 "$current_ip"; then
         echo "Current IP is: $current_ip"
