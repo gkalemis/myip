@@ -25,8 +25,7 @@ fi
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
-# Ensure the destination directory and file exist.
-mkdir -p "$(dirname "$FILE")"
+# Ensure the log file exists.
 touch "$FILE"
 
 previous_ip=$(
