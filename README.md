@@ -9,13 +9,24 @@ sudo apt install dnsutils util-linux
 ```
 
 The script tries Cloudflare DNS first and OpenDNS as a fallback. It is safe to
-run from cron because overlapping executions are ignored.
+run from cron because overlapping executions are ignored. Unchanged checks are
+silent; address changes are recorded in `ips.txt`.
+The history file is restricted to its owner (`0600`).
 
 Run it every minute with:
 
 ```cron
-* * * * * /home/george/scripts/myip/myip.sh >> /home/george/scripts/myip/myip.log 2>&1
+* * * * * /home/george/homelab/git_scripts/myip/myip.sh >/dev/null
 ```
 
-The log file contains status messages and errors from cron. `ips.txt` contains
-only timestamps at which the address changed.
+Informational output is discarded, so no ever-growing log file is created.
+Final failures remain on standard error for cron to report through its configured
+mail mechanism. `ips.txt` contains only timestamps at which the address changed.
+
+The defaults can be overridden with environment variables:
+
+- `MYIP_FILE`: history file path
+- `MYIP_MAX_ATTEMPTS`: positive number of lookup attempts
+- `MYIP_RETRY_DELAY`: non-negative delay between attempts, in seconds
+- `MYIP_CLOUDFLARE_DNS`: Cloudflare resolver address
+- `MYIP_OPENDNS_DNS`: OpenDNS resolver address

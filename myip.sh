@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
+umask 077
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
-readonly FILE="$SCRIPT_DIR/ips.txt"
-readonly MAX_ATTEMPTS=5
-readonly RETRY_DELAY=7
-readonly LOCK_FILE="/tmp/myip.lock"
-readonly CLOUDFLARE_DNS=1.0.0.1
-readonly OPENDNS_DNS=208.67.222.222
+readonly FILE="${MYIP_FILE:-$SCRIPT_DIR/ips.txt}"
+readonly MAX_ATTEMPTS="${MYIP_MAX_ATTEMPTS:-5}"
+readonly RETRY_DELAY="${MYIP_RETRY_DELAY:-7}"
+readonly CLOUDFLARE_DNS="${MYIP_CLOUDFLARE_DNS:-1.0.0.1}"
+readonly OPENDNS_DNS="${MYIP_OPENDNS_DNS:-208.67.222.222}"
+
+if [[ ! $MAX_ATTEMPTS =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: MYIP_MAX_ATTEMPTS must be a positive integer." >&2
+    exit 2
+fi
+
+if [[ ! $RETRY_DELAY =~ ^[0-9]+$ ]]; then
+    echo "Error: MYIP_RETRY_DELAY must be a non-negative integer." >&2
+    exit 2
+fi
 
 if ! command -v dig >/dev/null 2>&1; then
     echo "Error: dig is required but was not found in PATH." >&2
@@ -20,61 +30,6 @@ if ! command -v flock >/dev/null 2>&1; then
     echo "Error: flock is required but was not found in PATH." >&2
     exit 1
 fi
-
-# Prevent overlapping cron invocations from writing duplicate entries.
-exec 9>"$LOCK_FILE"
-flock -n 9 || exit 0
-
-# Ensure the log file exists.
-touch "$FILE"
-
-previous_ip=$(
-    awk -F' - ' '
-        NF >= 2 {
-            ip = $NF
-            gsub(/[[:space:]]/, "", ip)
-        }
-        END { print ip }
-    ' "$FILE"
-)
-
-get_public_ip() {
-    local ip
-
-    # Cloudflare TXT lookup.
-    ip=$(dig \
-        +short \
-        +time=5 \
-        +tries=1 \
-        TXT \
-        CH \
-        whoami.cloudflare \
-        "@$CLOUDFLARE_DNS" 2>/dev/null |
-        tr -d '"' |
-        head -n 1) || ip=""
-
-    if is_valid_ipv4 "$ip"; then
-        printf '%s\n' "$ip"
-        return 0
-    fi
-
-    # OpenDNS A-record fallback.
-    ip=$(dig \
-        +short \
-        +time=5 \
-        +tries=1 \
-        A \
-        myip.opendns.com \
-        "@$OPENDNS_DNS" 2>/dev/null |
-        head -n 1) || ip=""
-
-    if is_valid_ipv4 "$ip"; then
-        printf '%s\n' "$ip"
-        return 0
-    fi
-
-    return 1
-}
 
 is_valid_ipv4() {
     local ip=$1
@@ -91,6 +46,68 @@ is_valid_ipv4() {
     done
 }
 
+first_valid_ipv4() {
+    local candidate
+
+    while IFS= read -r candidate; do
+        candidate=${candidate//\"/}
+        if is_valid_ipv4 "$candidate"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+get_public_ip() {
+    local output
+
+    # Capture all output so an early-exiting filter cannot trigger SIGPIPE under pipefail.
+    output=$(dig \
+        +short \
+        +time=5 \
+        +tries=1 \
+        TXT \
+        CH \
+        whoami.cloudflare \
+        "@$CLOUDFLARE_DNS" 2>/dev/null) || output=""
+
+    if first_valid_ipv4 <<< "$output"; then
+        return 0
+    fi
+
+    output=$(dig \
+        +short \
+        +time=5 \
+        +tries=1 \
+        A \
+        myip.opendns.com \
+        "@$OPENDNS_DNS" 2>/dev/null) || output=""
+
+    first_valid_ipv4 <<< "$output"
+}
+
+# Lock the history file itself, avoiding predictable shared lock files in /tmp.
+exec 9>>"$FILE"
+flock -n 9 || exit 0
+chmod 600 "$FILE"
+
+previous_ip=$(
+    awk -F' - ' '
+        NF >= 2 {
+            ip = $NF
+            gsub(/[[:space:]]/, "", ip)
+        }
+        END { print ip }
+    ' "$FILE"
+)
+
+if [[ -n $previous_ip ]] && ! is_valid_ipv4 "$previous_ip"; then
+    echo "Warning: ignoring invalid previous IP in $FILE." >&2
+    previous_ip=""
+fi
+
 current_ip=""
 
 for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
@@ -101,15 +118,12 @@ for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
     fi
 
     if is_valid_ipv4 "$current_ip"; then
-        echo "Current IP is: $current_ip"
         break
     fi
 
     current_ip=""
 
     if ((attempt < MAX_ATTEMPTS)); then
-        echo "Could not determine the current IP on attempt $attempt/$MAX_ATTEMPTS."
-        echo "Retrying in $RETRY_DELAY seconds..."
         sleep "$RETRY_DELAY"
     fi
 done
@@ -120,7 +134,6 @@ if [[ -z $current_ip ]]; then
 fi
 
 if [[ $previous_ip == "$current_ip" ]]; then
-    echo "IP address has not changed."
     exit 0
 fi
 
